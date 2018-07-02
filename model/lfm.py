@@ -1,4 +1,5 @@
 # coding: utf-8 -*-
+import random
 import pickle
 import pandas as pd
 import numpy as np
@@ -52,7 +53,7 @@ class LFM:
     def __init__(self):
         self.class_count = 5
         self.iter_count = 5
-        self.alpha = 0.02
+        self.lr = 0.02
         self.lam = 0.01
         self._init_model()
 
@@ -66,8 +67,8 @@ class LFM:
         self.item_ids = set(self.frame['MovieID'].values)
         self.items_dict = Corpus.load()
 
-        array_p = np.random.rand(len(self.user_ids), self.class_count)
-        array_q = np.random.rand(len(self.item_ids), self.class_count)
+        array_p = np.random.randn(len(self.user_ids), self.class_count)
+        array_q = np.random.randn(len(self.item_ids), self.class_count)
         self.p = pd.DataFrame(array_p, columns=range(0, self.class_count), index=list(self.user_ids))
         self.q = pd.DataFrame(array_q, columns=range(0, self.class_count), index=list(self.item_ids))
 
@@ -96,19 +97,21 @@ class LFM:
         """
         Use SGD as optimizer, with L2 p, q square regular.
         e.g: E = 1/2 * (y - predict)^2, predict = matrix_p * matrix_q
-             derivation(E, p) = - matrix_q * (y - predict), derivation(E, q) = - matrix_p * (y - predict),
-             delta_p = alpha * (derivation(E, p) + l2_square), delta_q = alpha * (derivation(E, q) + l2_square)
+             derivation(E, p) = -(y - predict), derivation(E, q) = -(y - predict),
+             derivation（l2_square，p) = lam * p, derivation（l2_square, q) = lam * q
+             delta_p = lr * (derivation(E, p) + derivation（l2_square，p))
+             delta_q = lr * (derivation(E, q) + derivation（l2_square, q))
         """
-        gradient_p = - e * self.q.ix[item_id].values
-        l2_p = self.lam * np.square(self.p.ix[user_id].values)
-        delta_p = self.alpha * (gradient_p + l2_p)
+        gradient_p = -e * self.q.ix[item_id].values
+        l2_p = self.lam * self.p.ix[user_id].values
+        delta_p = self.lr * (gradient_p + l2_p)
 
-        gradient_q = - e * self.p.ix[user_id].values
-        l2_q = self.lam * np.square(self.q.ix[item_id].values)
-        delta_q = self.alpha * (gradient_q + l2_q)
+        gradient_q = -e * self.p.ix[user_id].values
+        l2_q = self.lam * self.q.ix[item_id].values
+        delta_q = self.lr * (gradient_q + l2_q)
 
-        self.p.loc[user_id] += np.array(delta_p.tolist())
-        self.q.loc[item_id] += np.array(delta_q.tolist())
+        self.p.loc[user_id] -= delta_p
+        self.q.loc[item_id] -= delta_q
 
     def train(self):
         """
@@ -116,10 +119,12 @@ class LFM:
         """
         for step in range(0, self.iter_count):
             for user_id, item_dict in self.items_dict.items():
-                for item_id, y in item_dict.items():
-                    e = self._loss(user_id, item_id, y, step)
+                item_ids = list(item_dict.keys())
+                random.shuffle(item_ids)
+                for item_id in item_ids:
+                    e = self._loss(user_id, item_id, item_dict[item_id], step)
                     self._optimize(user_id, item_id, e)
-            self.alpha *= 0.9
+            self.lr *= 0.9
         self.save()
 
     def predict(self, user_id, top_n=10):
