@@ -3,6 +3,7 @@ import sys
 from preprocess import Channel
 from workflow.cf_workflow import run as user_cf
 from workflow.lfm_workflow import run as lfm
+from workflow.prank_workflow import run as prank
 
 
 def manage():
@@ -14,7 +15,7 @@ def manage():
     elif arg == 'lfm':
         lfm()
     elif arg == 'prank':
-        pass
+        prank()
     else:
         print('Args must in ["preprocess", "cf", "lfm"，"prank"].')
     sys.exit()

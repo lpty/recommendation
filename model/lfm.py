@@ -16,10 +16,8 @@ class Corpus:
         cls.frame = pd.read_csv(file_path)
         cls.user_ids = set(cls.frame['UserID'].values)
         cls.item_ids = set(cls.frame['MovieID'].values)
-        items_dict = {user_id: cls._get_pos_neg_item(user_id) for user_id in list(cls.user_ids)}
-        f = open(cls.items_dict_path, 'wb')
-        pickle.dump(items_dict, f)
-        f.close()
+        cls.items_dict = {user_id: cls._get_pos_neg_item(user_id) for user_id in list(cls.user_ids)}
+        cls.save()
 
     @classmethod
     def _get_pos_neg_item(cls, user_id):
@@ -39,6 +37,12 @@ class Corpus:
         for item in pos_item_ids: item_dict[item] = 1
         for item in neg_item_ids: item_dict[item] = 0
         return item_dict
+
+    @classmethod
+    def save(cls):
+        f = open(cls.items_dict_path, 'wb')
+        pickle.dump(cls.items_dict, f)
+        f.close()
 
     @classmethod
     def load(cls):
@@ -97,7 +101,7 @@ class LFM:
         """
         Use SGD as optimizer, with L2 p, q square regular.
         e.g: E = 1/2 * (y - predict)^2, predict = matrix_p * matrix_q
-             derivation(E, p) = -(y - predict), derivation(E, q) = -(y - predict),
+             derivation(E, p) = -matrix_q*(y - predict), derivation(E, q) = -matrix_p*(y - predict),
              derivation（l2_square，p) = lam * p, derivation（l2_square, q) = lam * q
              delta_p = lr * (derivation(E, p) + derivation（l2_square，p))
              delta_q = lr * (derivation(E, q) + derivation（l2_square, q))

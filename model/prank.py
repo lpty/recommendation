@@ -1,94 +1,109 @@
 # coding: utf-8 -*-
+import pickle
 import pandas as pd
+
+
+class Graph:
+
+    graph_path = 'data/prank.graph'
+
+    @classmethod
+    def _gen_user_graph(cls, user_id):
+        print('Gen graph user: {}'.format(user_id))
+        item_ids = list(set(cls.frame[cls.frame['UserID'] == user_id]['MovieID']))
+        graph_dict = {'item_{}'.format(item_id): 1 for item_id in item_ids}
+        return graph_dict
+
+    @classmethod
+    def _gen_item_graph(cls, item_id):
+        print('Gen graph item: {}'.format(item_id))
+        user_ids = list(set(cls.frame[cls.frame['MovieID'] == item_id]['UserID']))
+        graph_dict = {'user_{}'.format(user_id): 1 for user_id in user_ids}
+        return graph_dict
+
+    @classmethod
+    def gen_graph(cls):
+        """
+        Gen graph.Each user,movie define as a node, and every movie rated by user means
+        that there is a edge between user and movie, edge weight is 1 simply.
+        """
+        file_path = 'data/ratings.csv'
+        cls.frame = pd.read_csv(file_path)
+        user_ids = list(set(cls.frame['UserID']))
+        item_ids = list(set(cls.frame['MovieID']))
+        cls.graph = {'user_{}'.format(user_id): cls._gen_user_graph(user_id) for user_id in user_ids}
+        for item_id in item_ids:
+            cls.graph['item_{}'.format(item_id)] = cls._gen_item_graph(item_id)
+        cls.save()
+
+    @classmethod
+    def save(cls):
+        f = open(cls.graph_path, 'wb')
+        pickle.dump(cls.graph, f)
+        f.close()
+
+    @classmethod
+    def load(cls):
+        f = open(cls.graph_path, 'rb')
+        graph = pickle.load(f)
+        f.close()
+        return graph
 
 
 class PersonalRank:
 
     def __init__(self):
-        pass
+        self.graph = Graph.load()
+        self.alpha = 0.6
+        self.iter_count = 20
+        self._init_model()
 
-    def getResource(csvpath):
-        '''
-        获取原始数据
-        :param csvpath: csv路径
-        :return: frame
-        '''
-        frame = pd.read_csv(csvpath)
-        return frame
+    def _init_model(self):
+        """
+        Initialize prob of every node, zero default.
+        """
+        self.params = {k: 0 for k in self.graph.keys()}
 
-    def getUserGraph(frame, userID=1):
-        '''
-        获取目标用户二分图, 不计权重
-        :param frame: ratings数据
-        :param userID: 目标ID
-        :return: 二分图字典
-        '''
-        itemList = list(set(frame[frame['UserID'] == userID]['MovieID']))
-        graphDict = {'i' + str(item): 1 for item in itemList}
-        return graphDict
+    def train(self, user_id):
+        """
+        For target user, every round will start at that node, means prob will be 1.
+        And node will be updated by formula like:
+        for each node, if node j have edge between i:
+            prob_i_j = alpha * prob_j / edge_num_out_of_node_j
+            then prob_i += prob_i_j
+        alpha means the prob of continue walk.
+        """
+        self.params['user_{}'.format(user_id)] = 1
+        for count in range(self.iter_count):
+            print('Step {}...'.format(count))
+            tmp = {k: 0 for k in self.graph.keys()}
+            # edges mean all edge out of node
+            for node, edges in self.graph.items():
+                for next_node, _ in edges.items():
+                    # every edge come in next_node update prob
+                    tmp[next_node] += self.alpha * self.params[node] / len(edges)
+            # root node.
+            tmp['user_' + str(user_id)] += 1 - self.alpha
+            self.params = tmp
+        self.params = sorted(self.params.items(), key=lambda x: x[1], reverse=True)
+        self.save(user_id)
 
-    def getItemGraph(frame, itemID=1):
-        '''
-        获取目标物品二分图, 不计权重
-        :param frame: ratings数据
-        :param userID: 目标ID
-        :return: 二分图字典
-        '''
-        userList = list(set(frame[frame['MovieID'] == itemID]['UserID']))
-        graphDict = {'u' + str(user): 1 for user in userList}
-        return graphDict
+    def predict(self, user_id, top_n=10):
+        """
+        Return top n node without movie target user have been rated and other user.
+        """
+        self.load(user_id)
+        frame = pd.read_csv('data/ratings.csv')
+        item_ids = ['item_' + str(item_id) for item_id in list(set(frame[frame['UserID'] == user_id]['MovieID']))]
+        candidates = [(key, value) for key, value in self.params if key not in item_ids and 'user' not in key]
+        return candidates[:top_n]
 
-    def initGraph(frame):
-        '''
-        初始化二分图
-        :param frame: ratings数据集
-        :return: 二分图
-        '''
-        userList = list(set(frame['UserID']))
-        itemList = list(set(frame['MovieID']))
-        G = {'u' + str(user): getUserGraph(frame, user) for user in userList}
-        for item in itemList: G['i' + str(item)] = getItemGraph(frame, item)
-        return G
+    def save(self, user_id):
+        f = open('data/prank_{}.model'.format(user_id), 'wb')
+        pickle.dump(self.params, f)
+        f.close()
 
-    def personalRank(G, alpha, userID, iterCount=20):
-        '''
-        随机游走迭代
-        :param G: 二分图
-        :param alpha: 随机游走的概率
-        :param userID: 目标用户
-        :param iterCount: 迭代次数
-        :return: series
-        '''
-        rank = {g: 0 for g in G.keys()}
-        rank['u' + str(userID)] = 1  # 根节点为起点选择概率为1,其他顶点为0
-        for k in range(iterCount):
-            tmp = {g: 0 for g in G.keys()}
-            for i, ri in G.items():  # 遍历每一个顶点
-                for j, wij in ri.items():  # 遍历每个顶点连接的顶点
-                    tmp[j] += alpha * rank[i] / len(ri)
-            tmp['u' + str(userID)] += 1 - alpha  # 根顶点r=1，加上1-alpha
-            rank = tmp
-        series = pd.Series(list(rank.values()), index=list(rank.keys()))
-        series = series.sort_values(ascending=False)
-        return series  # 返回排序后的series
-
-    def recommend(frame, series, userID, TopN=10):
-        '''
-        推荐TopN个用户没有评分的物品
-        :param frame: ratings数据
-        :param series: series
-        :param userID: 目标用户
-        :param TopN: TopN
-        :return: 推荐物品
-        '''
-        itemList = ['i' + str(i) for i in list(set(frame[frame['UserID'] == userID]['MovieID']))]
-        recommendList = [{u: series[u]} for u in list(series.index) if u not in itemList and 'u' not in u]
-        return recommendList[:TopN]
-
-
-if __name__ == '__main__':
-    frame = getResource('csvResource/ratings.csv')
-    G = initGraph(frame)
-    s = personalRank(G, 0.6, 1, iterCount=20)
-    r = recommend(frame, s, 1, TopN=10)
-    print(r)
+    def load(self, user_id):
+        f = open('data/prank_{}.model'.format(user_id), 'rb')
+        self.params = pickle.load(f)
+        f.close()
